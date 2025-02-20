@@ -1,54 +1,104 @@
 import streamlit as st
-import json
+import pandas as pd
+import os
+from datetime import datetime
 
-class InvestmentTracker:
-    def __init__(self, filename='portfolio.json'):
-        self.filename = filename
-        self.portfolio = self.load_portfolio()
+# CSV file where we store historical snapshots
+CSV_FILE = "investment_history.csv"
 
-    def load_portfolio(self):
-        try:
-            with open(self.filename, 'r') as file:
-                return json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
+def load_history():
+    """
+    Loads the investment history from CSV if it exists,
+    otherwise returns an empty DataFrame.
+    """
+    if os.path.exists(CSV_FILE):
+        return pd.read_csv(CSV_FILE)
+    else:
+        return pd.DataFrame(columns=[
+            "Date",
+            "Investment Name",
+            "Units",
+            "Cost Price",
+            "Current Price",
+            "Profit",
+            "Percentage Difference"
+        ])
 
-    def save_portfolio(self):
-        with open(self.filename, 'w') as file:
-            json.dump(self.portfolio, file, indent=4)
+def save_history(df_history: pd.DataFrame):
+    """
+    Saves the investment history DataFrame to CSV.
+    Appends to existing CSV or creates a new one if none exists.
+    """
+    # If the CSV doesn't exist, write with headers, otherwise append
+    if not os.path.exists(CSV_FILE):
+        df_history.to_csv(CSV_FILE, index=False)
+    else:
+        df_history.to_csv(CSV_FILE, mode='a', header=False, index=False)
 
-    def add_investment(self, name, amount, price_per_unit):
-        investment = {
-            'name': name,
-            'amount': amount,
-            'price_per_unit': price_per_unit
+def main():
+    st.title("Investment Performance Tracker")
+
+    # Create two tabs: Input and Performance
+    tab1, tab2 = st.tabs(["Input Tab", "Performance Over Time"])
+
+    # -----------------------------
+    # 1) INPUT TAB
+    # -----------------------------
+    with tab1:
+        st.subheader("Enter Today's Prices for Your Investments")
+
+        # Create an initial DataFrame for user inputs
+        initial_data = {
+            "Investment Name": [""],
+            "Units": [0],
+            "Cost Price": [0.0],
+            "Current Price": [0.0],
         }
-        self.portfolio.append(investment)
-        self.save_portfolio()
+        
+        input_df = pd.DataFrame(initial_data)
+        
+        # Let user edit multiple rows if needed
+        edited_df = st.experimental_data_editor(
+            input_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="investment_editor"
+        )
+        
+        # Calculate Profit & Percentage Difference
+        if not edited_df.empty:
+            edited_df["Profit"] = (edited_df["Current Price"] - edited_df["Cost Price"]) * edited_df["Units"]
+            edited_df["Percentage Difference"] = (
+                (edited_df["Current Price"] - edited_df["Cost Price"]) / edited_df["Cost Price"] * 100
+            ).round(2)
+            
+            st.write("Calculated Performance (Preview):")
+            st.dataframe(edited_df)
 
-    def calculate_total_value(self):
-        return sum(investment['amount'] * investment['price_per_unit'] for investment in self.portfolio)
+        if st.button("Save Investments"):
+            # Append today's entries to the historical CSV
+            if not edited_df.empty:
+                today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                edited_df["Date"] = today
+                
+                # Reorder columns for consistency
+                edited_df = edited_df[
+                    [
+                        "Date",
+                        "Investment Name",
+                        "Units",
+                        "Cost Price",
+                        "Current Price",
+                        "Profit",
+                        "Percentage Difference",
+                    ]
+                ]
 
-# Streamlit App
-tracker = InvestmentTracker()
+                save_history(edited_df)
+                st.success("Investments saved successfully!")
+            else:
+                st.warning("No data to save. Please fill in the table first.")
 
-st.title("Investment Tracker")
-
-st.sidebar.header("Add New Investment")
-name = st.sidebar.text_input("Investment Name")
-amount = st.sidebar.number_input("Amount", min_value=0.0, format='%f')
-price_per_unit = st.sidebar.number_input("Price per Unit", min_value=0.0, format='%f')
-if st.sidebar.button("Add Investment") and name and amount > 0 and price_per_unit > 0:
-    tracker.add_investment(name, amount, price_per_unit)
-    st.sidebar.success("Investment added successfully!")
-
-st.header("Portfolio")
-if tracker.portfolio:
-    for idx, investment in enumerate(tracker.portfolio, start=1):
-        st.write(f"{idx}. {investment['name']} - Amount: {investment['amount']}, Price/Unit: ${investment['price_per_unit']}")
-else:
-    st.write("Portfolio is empty.")
-
-st.header("Total Portfolio Value")
-total_value = tracker.calculate_total_value()
-st.write(f"${total_value}")
+    # -----------------------------
+    # 2) PERFORMANCE OVER TIME TAB
+    # ----------------------------
