@@ -1,104 +1,80 @@
 import streamlit as st
 import pandas as pd
-import os
-from datetime import datetime
+import matplotlib.pyplot as plt
+import datetime
 
-# CSV file where we store historical snapshots
-CSV_FILE = "investment_history.csv"
+# Initialize session state
+if 'investments' not in st.session_state:
+    st.session_state['investments'] = []
+if 'performance_data' not in st.session_state:
+    st.session_state['performance_data'] = pd.DataFrame()
 
-def load_history():
-    """
-    Loads the investment history from CSV if it exists,
-    otherwise returns an empty DataFrame.
-    """
-    if os.path.exists(CSV_FILE):
-        return pd.read_csv(CSV_FILE)
-    else:
-        return pd.DataFrame(columns=[
-            "Date",
-            "Investment Name",
-            "Units",
-            "Cost Price",
-            "Current Price",
-            "Profit",
-            "Percentage Difference"
-        ])
+# Input Tab
+st.title('Investment Performance Tracker')
+tab1, tab2 = st.tabs(['Input', 'Performance Over Time'])
 
-def save_history(df_history: pd.DataFrame):
-    """
-    Saves the investment history DataFrame to CSV.
-    Appends to existing CSV or creates a new one if none exists.
-    """
-    # If the CSV doesn't exist, write with headers, otherwise append
-    if not os.path.exists(CSV_FILE):
-        df_history.to_csv(CSV_FILE, index=False)
-    else:
-        df_history.to_csv(CSV_FILE, mode='a', header=False, index=False)
+with tab1:
+    st.header('Enter Today’s Investment Prices')
+    name = st.text_input('Investment Name')
+    units = st.number_input('Units Bought', min_value=0.0)
+    cost_price = st.number_input('Cost Price per Unit', min_value=0.0)
+    today_price = st.number_input('Price per Unit Today', min_value=0.0)
 
-def main():
-    st.title("Investment Performance Tracker")
+    if st.button('Calculate Performance'):
+        if name and units > 0 and cost_price > 0 and today_price > 0:
+            percentage_difference = ((today_price - cost_price) / cost_price) * 100
+            total_profit = (today_price - cost_price) * units
+            st.session_state['investments'].append({
+                'Name': name,
+                'Units': units,
+                'Cost Price': cost_price,
+                'Today Price': today_price,
+                'Percentage Difference (%)': percentage_difference,
+                'Total Profit': total_profit
+            })
+        else:
+            st.warning('Please fill in all fields correctly.')
 
-    # Create two tabs: Input and Performance
-    tab1, tab2 = st.tabs(["Input Tab", "Performance Over Time"])
+    if st.session_state['investments']:
+        df = pd.DataFrame(st.session_state['investments'])
+        st.dataframe(df)
 
-    # -----------------------------
-    # 1) INPUT TAB
-    # -----------------------------
-    with tab1:
-        st.subheader("Enter Today's Prices for Your Investments")
-
-        # Create an initial DataFrame for user inputs
-        initial_data = {
-            "Investment Name": [""],
-            "Units": [0],
-            "Cost Price": [0.0],
-            "Current Price": [0.0],
-        }
-        
-        input_df = pd.DataFrame(initial_data)
-        
-        # Let user edit multiple rows if needed
-        edited_df = st.experimental_data_editor(
-            input_df,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="investment_editor"
-        )
-        
-        # Calculate Profit & Percentage Difference
-        if not edited_df.empty:
-            edited_df["Profit"] = (edited_df["Current Price"] - edited_df["Cost Price"]) * edited_df["Units"]
-            edited_df["Percentage Difference"] = (
-                (edited_df["Current Price"] - edited_df["Cost Price"]) / edited_df["Cost Price"] * 100
-            ).round(2)
-            
-            st.write("Calculated Performance (Preview):")
-            st.dataframe(edited_df)
-
-        if st.button("Save Investments"):
-            # Append today's entries to the historical CSV
-            if not edited_df.empty:
-                today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                edited_df["Date"] = today
-                
-                # Reorder columns for consistency
-                edited_df = edited_df[
-                    [
-                        "Date",
-                        "Investment Name",
-                        "Units",
-                        "Cost Price",
-                        "Current Price",
-                        "Profit",
-                        "Percentage Difference",
-                    ]
-                ]
-
-                save_history(edited_df)
-                st.success("Investments saved successfully!")
+    if st.button('Save Investments'):
+        if st.session_state['investments']:
+            df = pd.DataFrame(st.session_state['investments'])
+            df['Date'] = datetime.datetime.now().strftime('%Y-%m-%d')
+            if st.session_state['performance_data'].empty:
+                st.session_state['performance_data'] = df
             else:
-                st.warning("No data to save. Please fill in the table first.")
+                st.session_state['performance_data'] = pd.concat(
+                    [st.session_state['performance_data'], df], ignore_index=True
+                )
+            st.success('Investments saved!')
 
-    # -----------------------------
-    # 2) PERFORMANCE OVER TIME TAB
-    # ----------------------------
+with tab2:
+    st.header('Performance Over Time')
+    if not st.session_state['performance_data'].empty:
+        df = st.session_state['performance_data']
+        view_option = st.radio('View Performance:', ['Per Product', 'Total Level'])
+
+        if view_option == 'Per Product':
+            investment_names = df['Name'].unique()
+            selected_investment = st.selectbox('Select Investment', investment_names)
+            plot_df = df[df['Name'] == selected_investment]
+            fig, ax = plt.subplots()
+            ax.plot(plot_df['Date'], plot_df['Total Profit'], marker='o')
+            ax.set_title(f'{selected_investment} Performance Over Time')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Total Profit')
+            st.pyplot(fig)
+
+        else:
+            total_df = df.groupby('Date')['Total Profit'].sum().reset_index()
+            fig, ax = plt.subplots()
+            ax.plot(total_df['Date'], total_df['Total Profit'], marker='o')
+            ax.set_title('Total Portfolio Performance Over Time')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Total Profit')
+            st.pyplot(fig)
+    else:
+        st.info('No data to display. Please save investments first.')
